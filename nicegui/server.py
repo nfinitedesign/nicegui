@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import multiprocessing
 import socket
+import time
+from threading import Thread
 from typing import List, Optional
 
 import uvicorn
@@ -34,3 +36,17 @@ class Server(uvicorn.Server):
 
         storage.set_storage_secret(self.config.storage_secret)
         super().run(sockets=sockets)
+
+
+class ThreadedServer(Server):
+    thread: Thread
+
+    def run_in_thread(self, sockets: Optional[List[socket.socket]] = None) -> None:
+        self.thread = Thread(target=self.run, args=[sockets])
+        self.thread.start()
+        while not self.started:
+            time.sleep(1e-03)
+
+    def stop(self):
+        self.should_exit = True
+        self.thread.join()

@@ -15,7 +15,7 @@ from . import welcome
 from .client import Client
 from .language import Language
 from .logging import log
-from .server import CustomServerConfig, Server
+from .server import CustomServerConfig, Server, ThreadedServer
 
 APP_IMPORT_STRING = 'nicegui:app'
 
@@ -37,6 +37,7 @@ def run(*,
         fullscreen: bool = False,
         frameless: bool = False,
         reload: bool = True,
+        threaded: bool = False,
         uvicorn_logging_level: str = 'warning',
         uvicorn_reload_dirs: str = '.',
         uvicorn_reload_includes: str = '*.py',
@@ -68,6 +69,7 @@ def run(*,
     :param fullscreen: open the UI in a fullscreen window (default: `False`, also activates `native`)
     :param frameless: open the UI in a frameless window (default: `False`, also activates `native`)
     :param reload: automatically reload the UI on file changes (default: `True`)
+    :param threaded: run server in a separate thread (default: `False`)
     :param uvicorn_logging_level: logging level for uvicorn server (default: `'warning'`)
     :param uvicorn_reload_dirs: string with comma-separated list for directories to be monitored (default is current working directory only)
     :param uvicorn_reload_includes: string with comma-separated list of glob-patterns which trigger reload on modification (default: `'*.py'`)
@@ -154,7 +156,13 @@ def run(*,
     config.storage_secret = storage_secret
     config.method_queue = native_module.method_queue if native else None
     config.response_queue = native_module.response_queue if native else None
-    Server.create_singleton(config)
+
+    if threaded:
+        ThreadedServer.create_singleton(config)
+        run_server = ThreadedServer.instance.run_in_thread
+    else:
+        Server.create_singleton(config)
+        run_server = Server.instance.run
 
     if (reload or config.workers > 1) and not isinstance(config.app, str):
         log.warning('You must pass the application as an import string to enable "reload" or "workers".')
@@ -162,14 +170,14 @@ def run(*,
 
     if config.should_reload:
         sock = config.bind_socket()
-        ChangeReload(config, target=Server.instance.run, sockets=[sock]).run()
+        ChangeReload(config, target=run_server, sockets=[sock]).run()
     elif config.workers > 1:
         sock = config.bind_socket()
-        Multiprocess(config, target=Server.instance.run, sockets=[sock]).run()
+        Multiprocess(config, target=run_server, sockets=[sock]).run()
     else:
-        Server.instance.run()
+        run_server()
     if config.uds:
         os.remove(config.uds)  # pragma: py-win32
 
-    if not Server.instance.started and not config.should_reload and config.workers == 1:
+    if not threaded and not Server.instance.started and not config.should_reload and config.workers == 1:
         sys.exit(STARTUP_FAILURE)
